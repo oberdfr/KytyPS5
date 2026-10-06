@@ -2,14 +2,21 @@
 #include "common/assert.h"
 #include "common/common.h"
 #include "common/emulatorConfig.h"
+#include "common/file.h"
 #include "common/logging/log.h"
 #include "common/stringUtils.h"
+#include "kernel/fileSystem.h"
 #include "libs/dialog.h"
 #include "libs/errno.h"
 #include "libs/libs.h"
 #include "loader/symbolDatabase.h"
 
 #include <cstring>
+#include <vector>
+
+#if KYTY_PLATFORM == KYTY_PLATFORM_LINUX
+#include <unistd.h>
+#endif
 
 namespace Libs {
 
@@ -235,6 +242,77 @@ static int KYTY_SYSV_ABI SystemServiceReportAbnormalTermination(const void* info
 	LOGF("\t info = 0x%016" PRIx64 "\n", reinterpret_cast<uint64_t>(info));
 
 	return OK;
+}
+
+static int KYTY_SYSV_ABI SystemServiceLoadExec(const char* path, char* const argv[]) {
+	PRINT_NAME();
+
+	LOGF("\t path = %s\n", path != nullptr ? path : "<null>");
+
+	if (path == nullptr || *path == '\0') {
+		return SYSTEM_SERVICE_ERROR_PARAMETER;
+	}
+
+	std::string req_path(path);
+	auto target_path = Libs::LibKernel::FileSystem::GetRealFilename(req_path);
+	if (!Common::File::IsFileExisting(target_path) && !req_path.starts_with("/")) {
+		target_path = Libs::LibKernel::FileSystem::GetRealFilename(std::string("/app0/") + req_path);
+	}
+
+	if (!Common::File::IsFileExisting(target_path)) {
+		LOGF("SystemServiceLoadExec: target file not found: %s\n", req_path.c_str());
+		return SYSTEM_SERVICE_ERROR_INTERNAL;
+	}
+
+	LOGF("SystemServiceLoadExec: restarting into target: %s\n", target_path.string().c_str());
+
+#if KYTY_PLATFORM == KYTY_PLATFORM_LINUX
+	std::vector<std::string> args;
+	FILE* cmd_f = std::fopen("/proc/self/cmdline", "rb");
+	if (cmd_f != nullptr) {
+		std::vector<char> buf(8192);
+		size_t n = std::fread(buf.data(), 1, buf.size(), cmd_f);
+		std::fclose(cmd_f);
+		size_t start = 0;
+		for (size_t i = 0; i < n; i++) {
+			if (buf[i] == '\0') {
+				args.emplace_back(&buf[start]);
+				start = i + 1;
+			}
+		}
+	}
+
+	if (args.empty()) {
+		args.push_back("./kyty_emulator");
+		args.push_back("--game");
+		args.push_back(target_path.string());
+	} else {
+		bool replaced = false;
+		for (size_t i = 0; i < args.size(); i++) {
+			if (args[i] == "--game" && i + 1 < args.size()) {
+				args[i + 1] = target_path.string();
+				replaced = true;
+				break;
+			}
+		}
+		if (!replaced) {
+			args.push_back("--game");
+			args.push_back(target_path.string());
+		}
+	}
+
+	std::vector<char*> exec_argv;
+	exec_argv.reserve(args.size() + 1);
+	for (auto& a: args) {
+		exec_argv.push_back(a.data());
+	}
+	exec_argv.push_back(nullptr);
+
+	::execv("/proc/self/exe", exec_argv.data());
+	return SYSTEM_SERVICE_ERROR_INTERNAL;
+#else
+	return OK;
+#endif
 }
 
 } // namespace SystemService
@@ -548,6 +626,7 @@ LIB_DEFINE(InitSystemService_1) {
 	LIB_FUNC("Q3utJvma4Mo", SystemService::SystemServiceSetNoticeScreenSkipFlag);
 	LIB_FUNC("XbbJC3E+L5M", SystemService::SystemServicePowerTick);
 	LIB_FUNC("3s8cHiCBKBE", SystemService::SystemServiceReportAbnormalTermination);
+	LIB_FUNC("JoBqSQt1yyA", SystemService::SystemServiceLoadExec);
 	SystemGesture::InitSystemGesture_1(s);
 }
 
