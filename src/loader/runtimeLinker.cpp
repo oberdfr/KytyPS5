@@ -1265,9 +1265,30 @@ void RuntimeLinker::Execute(const std::filesystem::path& game_patch) {
 	}
 #endif
 
-	// The runtime automatically loads libc; other PRXs are requested by the application.
-	const auto libc_path = Libs::LibKernel::FileSystem::GetRealFilename("/app0/sce_module/libc.prx");
-	auto* libc = Common::File::IsFileExisting(libc_path) ? LoadProgram(libc_path) : nullptr;
+	// Load every PRX shipped in the title's module directory, not just libc.
+	// Titles that ship their own libSceNpCppWebApi.prx (or similar) never get
+	// a chance to request them at runtime once the linker gives up on them.
+	const auto modules_dir = Libs::LibKernel::FileSystem::GetRealFilename("/app0/sce_module");
+	auto*       libc        = static_cast<Program*>(nullptr);
+	if (std::filesystem::is_directory(modules_dir)) {
+		for (const auto& entry: std::filesystem::directory_iterator(modules_dir)) {
+			if (!entry.is_regular_file() || entry.path().extension() != ".prx") {
+				continue;
+			}
+			if (entry.path().filename() == "libc.prx") {
+				libc = LoadProgram(entry.path());
+			} else {
+				LoadProgram(entry.path());
+			}
+		}
+	}
+	if (libc == nullptr) {
+		const auto libc_path =
+		    Libs::LibKernel::FileSystem::GetRealFilename("/app0/sce_module/libc.prx");
+		if (Common::File::IsFileExisting(libc_path)) {
+			libc = LoadProgram(libc_path);
+		}
+	}
 	RelocateAll();
 
 	if (!game_patch.empty()) {
