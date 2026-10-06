@@ -3186,20 +3186,17 @@ int KYTY_SYSV_ABI KernelMapDirectMemory(void** addr, size_t len, int prot, int f
 
 	PhysicalMemory::AllocatedBlock mapped_block {};
 	g_physical_memory->Find(direct_memory_start, false, &mapped_block);
-	bool published = !replaced_mappings.empty() || reserved_target
-	                     ? g_virtual_ranges->ReplaceSpan(
-	                           out_addr, len, replaced_mappings.empty()
-	                                              ? VirtualRangeType::Reserved
-	                                              : VirtualRangeType::Direct,
-	                           direct_memory_start,
-	                           prot, mapped_block.memory_type, VirtualRangeType::Direct, "")
-	                     : g_virtual_ranges->Add(out_addr, len, direct_memory_start, prot,
-	                                             mapped_block.memory_type,
-	                                             VirtualRangeType::Direct, "");
+	bool published =
+	    !replaced_mappings.empty() || reserved_target
+	        ? g_virtual_ranges->ReplaceSpan(
+	              out_addr, len,
+	              replaced_mappings.empty() ? VirtualRangeType::Reserved : VirtualRangeType::Direct,
+	              direct_memory_start, prot, mapped_block.memory_type, VirtualRangeType::Direct, "")
+			: g_virtual_ranges->Add(out_addr, len, direct_memory_start, prot,
+				                    mapped_block.memory_type, VirtualRangeType::Direct, "");
 	if (!published && (reserved_target || IsInPrtAperture(out_addr, len))) {
 		published = g_virtual_ranges->Add(out_addr, len, direct_memory_start, prot,
-		                                  mapped_block.memory_type,
-		                                  VirtualRangeType::Direct, "");
+		                                  mapped_block.memory_type, VirtualRangeType::Direct, "");
 	}
 	if (!published) {
 		GpuAccessMode rollback_gpu_mode = GpuAccessMode::NoAccess;

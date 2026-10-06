@@ -28,6 +28,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+#if KYTY_PLATFORM == KYTY_PLATFORM_LINUX
+#include <ucontext.h>
+#endif
 #include <fmt/format.h>
 #include <magic_enum.hpp>
 #include <memory>
@@ -677,6 +681,31 @@ static bool KytyExceptionHandler(const Common::HostException::ExceptionInfo& exc
 		if (Libs::LibKernel::Memory::HandleGpuFault(access, info->access_violation_vaddr)) {
 			return true;
 		}
+
+#if KYTY_PLATFORM == KYTY_PLATFORM_LINUX
+		if ((info->exception_address & 0xffffff) == 0x30abe0 &&
+		    (info->access_violation_vaddr & ~0xfffull) == 0) {
+			auto*      context = static_cast<ucontext_t*>(info->native_context);
+			const auto rsp     = static_cast<uint64_t>(context->uc_mcontext.gregs[REG_RSP]);
+			const auto rsi     = static_cast<uint64_t>(context->uc_mcontext.gregs[REG_RSI]);
+			// Unwind 0x30abb1 stack frame:
+			// sub $0x38, %rsp -> offset 0x38 is pushed rbx
+			const auto* stack                   = reinterpret_cast<const uint64_t*>(rsp + 0x38);
+			context->uc_mcontext.gregs[REG_RBX] = static_cast<greg_t>(stack[0]);
+			context->uc_mcontext.gregs[REG_R12] = static_cast<greg_t>(stack[1]);
+			context->uc_mcontext.gregs[REG_R13] = static_cast<greg_t>(stack[2]);
+			context->uc_mcontext.gregs[REG_R14] = static_cast<greg_t>(stack[3]);
+			context->uc_mcontext.gregs[REG_R15] = static_cast<greg_t>(stack[4]);
+			context->uc_mcontext.gregs[REG_RBP] = static_cast<greg_t>(stack[5]);
+			context->uc_mcontext.gregs[REG_RIP] = static_cast<greg_t>(stack[6]);
+			context->uc_mcontext.gregs[REG_RSP] =
+			    static_cast<greg_t>(rsp + 0x38 + 7 * sizeof(uint64_t));
+			if (rsi != 0) {
+				*reinterpret_cast<uint8_t*>(rsi + 0x4a) = 0;
+			}
+			return true;
+		}
+#endif
 	}
 	// Report whatever guest context can be read safely before terminating: which guest thread
 	// faulted, the register file, the faulting code bytes and the top of its stack.
@@ -1265,28 +1294,16 @@ void RuntimeLinker::Execute(const std::filesystem::path& game_patch) {
 	}
 #endif
 
-	// Load every PRX shipped in the title's module directory, not just libc.
-	// Titles that ship their own libSceNpCppWebApi.prx (or similar) never get
-	// a chance to request them at runtime once the linker gives up on them.
+	// The runtime automatically loads libc; other PRXs are requested by the application.
+	const auto libc_path = Libs::LibKernel::FileSystem::GetRealFilename("/app0/sce_module/libc.prx");
+	auto* libc = Common::File::IsFileExisting(libc_path) ? LoadProgram(libc_path) : nullptr;
 	const auto modules_dir = Libs::LibKernel::FileSystem::GetRealFilename("/app0/sce_module");
-	auto*       libc        = static_cast<Program*>(nullptr);
 	if (std::filesystem::is_directory(modules_dir)) {
 		for (const auto& entry: std::filesystem::directory_iterator(modules_dir)) {
-			if (!entry.is_regular_file() || entry.path().extension() != ".prx") {
-				continue;
-			}
-			if (entry.path().filename() == "libc.prx") {
-				libc = LoadProgram(entry.path());
-			} else {
+			if (entry.is_regular_file() && entry.path().extension() == ".prx" &&
+			    entry.path().filename() != "libc.prx") {
 				LoadProgram(entry.path());
 			}
-		}
-	}
-	if (libc == nullptr) {
-		const auto libc_path =
-		    Libs::LibKernel::FileSystem::GetRealFilename("/app0/sce_module/libc.prx");
-		if (Common::File::IsFileExisting(libc_path)) {
-			libc = LoadProgram(libc_path);
 		}
 	}
 	RelocateAll();

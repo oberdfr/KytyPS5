@@ -254,9 +254,10 @@ static int KYTY_SYSV_ABI SystemServiceLoadExec(const char* path, char* const arg
 	}
 
 	std::string req_path(path);
-	auto target_path = Libs::LibKernel::FileSystem::GetRealFilename(req_path);
+	auto        target_path = Libs::LibKernel::FileSystem::GetRealFilename(req_path);
 	if (!Common::File::IsFileExisting(target_path) && !req_path.starts_with("/")) {
-		target_path = Libs::LibKernel::FileSystem::GetRealFilename(std::string("/app0/") + req_path);
+		target_path =
+		    Libs::LibKernel::FileSystem::GetRealFilename(std::string("/app0/") + req_path);
 	}
 
 	if (!Common::File::IsFileExisting(target_path)) {
@@ -268,10 +269,10 @@ static int KYTY_SYSV_ABI SystemServiceLoadExec(const char* path, char* const arg
 
 #if KYTY_PLATFORM == KYTY_PLATFORM_LINUX
 	std::vector<std::string> args;
-	FILE* cmd_f = std::fopen("/proc/self/cmdline", "rb");
+	FILE*                    cmd_f = std::fopen("/proc/self/cmdline", "rb");
 	if (cmd_f != nullptr) {
 		std::vector<char> buf(8192);
-		size_t n = std::fread(buf.data(), 1, buf.size(), cmd_f);
+		size_t            n = std::fread(buf.data(), 1, buf.size(), cmd_f);
 		std::fclose(cmd_f);
 		size_t start = 0;
 		for (size_t i = 0; i < n; i++) {
@@ -291,7 +292,7 @@ static int KYTY_SYSV_ABI SystemServiceLoadExec(const char* path, char* const arg
 		for (size_t i = 0; i < args.size(); i++) {
 			if (args[i] == "--game" && i + 1 < args.size()) {
 				args[i + 1] = target_path.string();
-				replaced = true;
+				replaced    = true;
 				break;
 			}
 		}
